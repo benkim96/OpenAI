@@ -1,147 +1,155 @@
-import numpy as np
 import random
+import numpy as np
 import gym
-
+import matplotlib.pyplot as plt
+import queue
 
 env = gym.make('CartPole-v0')
-
-GAMMA = 0.99 # determines how much future rewards are worth range 0-1 (discount) no randomness here future is definite
-#LEARNING_RATE = .99 # the extent to which new information overrides old
-NUM_EPISODES = 2000
-MIN_EXPLORE_RATE = 0.01
-"""
-the learning rate, set between 0 and 1.
-Setting it to 0 means that the Q-values are never updated,
-hence nothing is learned. Setting a high value such as 0.9
-means that learning can occur quickly.
-"""
+GAMMA = 0.99
+NUM_EPISODES = 1000
+MIN_EXPLORE_RATE = 0.001
 MIN_LEARNING_RATE = 0.1
 Q = np.random.rand(162, env.action_space.n)
-#Q = np.zeros([162, 2])
-# 162 boxes = 3 * 3 * 6 * 3
-#BIN_NUMBERS = (3, 3, 6, 3)
-def get_Box(observation):
-    x, x_dot, theta, theta_dot = observation
-    # {-2.4, 2.4}
-    if x < -.8:
-        box_number = 0
-    elif x < .8:
-        box_number = 1
-    else:
-        box_number = 2
+#Q = np.zeros((162, env.action_space.n))
+Q = np.loadtxt('cp-data.txt')
 
-    if x_dot < -.5:
-        pass
-    elif x_dot < .5:
-        box_number += 3
-    else:
-        box_number += 6
-    if theta < np.radians(-12):
-        pass
-    elif theta < np.radians(-1.5):
-        box_number += 9
-    elif theta < np.radians(0):  # golden spot
-        box_number += 18
-    elif theta < np.radians(1.5):
-        box_number += 27
-    elif theta < np.radians(12):
-        box_number += 36
-    else:
-        box_number += 45
+learningRates = []
+exploreRates = []
+countRates = []
 
-    if theta_dot < np.radians(-50):
-        pass
-    elif theta_dot < np.radians(50):
-        box_number += 54
-    else:
-        box_number += 108
+y = np.arange(NUM_EPISODES + 1)
+q = queue.Queue(100)
 
-    return box_number
+def get_Box(obv):
+	x, x_dot, theta, theta_dot = obv
 
-def update_explore_rate(episode):
+	if x < -.8:
+		box_number = 0
+	elif x < .8:
+		box_number = 1
+	else:
+		box_number = 2
 
-    # this number slowly decreases from roughly 2.4
-    # start big, LEARN, stop exploring as much
-    return max(MIN_EXPLORE_RATE, min(1, 1.0 - np.log10((episode+1)/25)))
+	if x_dot < -.5:
+		pass
+	elif x_dot < .5:
+		box_number += 3
+	else:
+		box_number += 6
 
-def update_learning_rate(episode):
-    """
-    The learning rate or step size determines to what
-    extent the newly acquired information will override
-    the old information. A factor of 0 will make the agent
-    not learn anything, while a factor of 1 would make the agent
-    consider only the most recent information.
-    """
-    # we stop learning as fast as time progresses
-    #return min()
-    return max(MIN_LEARNING_RATE, (min(0.5, 1.0 - np.log10((episode + 1) / 25))))
+	if theta < np.radians(-12):
+		pass
+	elif theta < np.radians(-1.5):
+		box_number += 9
+	elif theta < np.radians(0):
+		box_number += 18
+	elif theta < np.radians(1.5):
+		box_number += 27
+	elif theta < np.radians(12):
+		box_number += 36
+	else:
+		box_number += 45
+
+	if theta_dot < np.radians(-50):
+		pass
+	elif theta_dot < np.radians(50):
+		box_number += 54
+	else:
+		box_number += 108
+
+	return box_number
+
+def update_explore_rate(episode, count100):
+	newRate = max(MIN_EXPLORE_RATE, min(1.0, 1.0 - np.log10((episode+1)/10)))
+	exploreRates.append(newRate*100)
+	print("Explore Rate:", newRate)
+	return newRate
+
+def update_learning_rate(episode, count100):
+	if count100 > 80:
+		newRate = 1 - count100/100.0
+	else:
+		newRate = max(MIN_LEARNING_RATE, min(1.0, 1.0 - np.log10((episode+1)/10)))
+
+	learningRates.append(newRate*100)
+	print("Learning Rate:", newRate)
+	return newRate
 
 def update_action(state, explore_rate):
-    if random.random() < explore_rate:
-        return env.action_space.sample()
-    else:
-        return np.argmax(Q[state])
-
+	if random.random() < explore_rate:
+		return env.action_space.sample()
+	else:
+		return np.argmax(Q[state])
 
 def q_learn():
-    total_reward = 0
-    total_completions = 0
-    explore_rate = update_explore_rate(0)
-    learning_rate = update_learning_rate(0)
+	count100 = 0
+	total_reward = 0
+	total_completions = 0
+	explore_rate = update_explore_rate(0, 0)
+	learning_rate = update_learning_rate(0, 0)
 
-    for i in range(NUM_EPISODES):
-        observation = env.reset()
-        state_0 = get_Box(observation)
-        for _ in range(250):
-            env.render()
-            action = update_action(state_0, explore_rate)
-            obv, reward, done, info = env.step(action)
+	first_completion = 0
+	completed = False
 
-            state_1 = get_Box(obv)
-            q_max = np.max(Q[state_0])
-            Q[state_0, action] += learning_rate*(reward + GAMMA*np.amax(Q[state_1]) - Q[state_0, action])
+	for i in range(NUM_EPISODES):
+		observation = env.reset()
+		state_0 = get_Box(observation)
+		steps = 0
+		for _ in range(250):
+			if (NUM_EPISODES - i) < 3:
+				env.render()
+			#env.render()
+			action = update_action(state_0, explore_rate)
+			obv, reward, done, info = env.step(action)
 
-            state_0 = state_1
-            total_reward += reward
+			state_1 = get_Box(obv)
+			q_max = np.max(Q[state_0])
+			Q[state_0, action] += learning_rate*(reward + GAMMA*np.amax(Q[state_1]) - Q[state_0, action])
 
-            if done:
-                #print("Episode finished after %f time steps" % (_))
-                #print("learning rate: ", learning_rate)
-                #print("explore rate: ", explore_rate)
-                #print("best q: ", q_max)
-               # print("total completions: ", total_completions)
+			state_0 = state_1
+			total_reward += reward
 
-                if _ > 192:
-                    total_completions+=1
-                break
+			steps = (_)
 
-        learning_rate = update_learning_rate(i)
-        explore_rate = update_explore_rate(i)
-       # print("explore rate: ", explore_rate)
-       # print("learning rate: ", learning_rate)
+			if done:
+				if q.full():
+					count100 -= q.get()
+				q.put(0)
+				break
 
-        print("total completions: ", total_completions)
-        print("REWARD/TIME: ", total_reward/(i+1))
-        print("Episode: ", i)
+			if _ > 195:
+				if q.full():
+					count100 -= q.get()
+				q.put(1)
+				count100 +=  1
+				total_completions += 1
+				if not completed:
+					first_completion = i
+					completed = True
+				break
 
-    #print("Final Q values: ", Q)
+		learning_rate = update_learning_rate(i, count100)
+		explore_rate = update_explore_rate(i, count100)
+		countRates.append(count100)
+		print("Total: ", total_completions)
+		print("Trial: ", i)
+		print("100 score: ", count100)
+
+
+	print("First Completion: ", first_completion)
+	print("Completions/Total: ", total_completions/NUM_EPISODES)
 
 def main():
-    q_learn()
+	q_learn()
+	countRates.append(100)
+	plt.plot(y, learningRates, 'blue')
+	plt.plot(y, exploreRates, 'green')
+	plt.plot(y, countRates, 'red')
+	plt.axis([0, NUM_EPISODES, 0, 101])
+	plt.legend(['learning rate', 'explore rate', 'last 100 score'], loc='lower right')
+	plt.show()
+
+	np.savetxt('cp-data.txt', Q, fmt='%d')
 
 if __name__ == "__main__":
-    main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	main()
